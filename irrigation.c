@@ -36,10 +36,26 @@ to compute correct irrigation timing for the various garden locations.
 #define BUFFER_SIZE (256 * 1024) /* 256 KB */
 
 
+typedef struct cimis_results {
+    float Et0;
+    float precip;
+    int parse_errors;   // will save how many json types were incorrect
+} cimis_results;
+
+typedef struct garden_section {
+    const char *name;
+    float PF;
+    int LA;
+    int days_since;   // number of days since last irrigation 
+    float eff_irr;    // effective irrigation value
+} garden_section;
+
+
 struct write_result {
     char *data;
     int pos;
 };
+
 
 static size_t write_response(void *ptr, size_t size, size_t nmemb, void *stream) {
     /* Save the GET response from into write_result struct, function from jannson example code */
@@ -57,7 +73,6 @@ static size_t write_response(void *ptr, size_t size, size_t nmemb, void *stream)
 }
 
 
-
 static int newline_offset(const char *text) {
     /* Return the offset of the first newline in text or the length of
    text if there's no newline */
@@ -67,7 +82,6 @@ static int newline_offset(const char *text) {
     else
         return (int)(newline - text);
 }
-
 
 
 static char *request(const char *url) {
@@ -132,14 +146,7 @@ error:
 }
 
 
-typedef struct cimis_results {
-    float Et0;
-    float precip;
-    int parse_errors;   // will save how many json types were incorrect
-} cimis_results;
-
-
-cimis_results parseCimisJson(json_t *json_root){
+cimis_results parse_cimis_json(json_t *json_root){
     // to check what type it actually is, go to https://jansson.readthedocs.io/en/2.8/apiref.html#c.json_type
     // and check typeof (it's an int and the types are listed in order)
 
@@ -196,7 +203,6 @@ cimis_results parseCimisJson(json_t *json_root){
         eto_value = json_string_value(EToValue);
             // printf("%.8s %.*s\n", json_string_value(Providers), newline_offset(eto_value),
             //     eto_value);
-
         total_eto = total_eto + strtof(eto_value, NULL);
 
         // *************** get the Precipitation data for the day *************** //
@@ -218,7 +224,6 @@ cimis_results parseCimisJson(json_t *json_root){
             precip_value = json_string_value(PrecipValue);
             // printf("%.8s %.*s\n", json_string_value(Providers), newline_offset(precip_value),
             // precip_value);
-
             total_precipitation = total_precipitation + strtof(precip_value, NULL);
         }
    
@@ -232,6 +237,19 @@ cimis_results parseCimisJson(json_t *json_root){
 }
 
 
+const char * get_json_string(char *Val, json_t *json_data){
+    json_t *getVal;
+    const char *value;
+
+    getVal = json_object_get(json_data, Val);
+    if (!json_is_string(getVal)) {
+        printf("Is this not a String?\n");
+        printf("    getVal is a(n) %d\n", json_typeof(getVal));
+    }
+
+    return json_string_value(getVal);
+}
+   
 
 int main(){
     char *cimis_station = CIMIS_STATION;
@@ -278,7 +296,7 @@ int main(){
     // strcat(file_name, today_buffer);
     // strcat(file_name, ".json");
 
-    char *file_name = "cimis_2023-07-06_2023-07-13.json";
+    char *file_name = "cimis_2023-07-06_2023-07-13.json";   // hard coded for testing, see above code for real file name creation, will cause an invalide free at the end 
     printf("Testing to see if file %s exists\n", file_name);
 
     // check if call has already been made for this dataset by checking if a file already exists for it
@@ -337,33 +355,62 @@ int main(){
     }
 
     cimis_results cimis_out;
-    cimis_out = parseCimisJson(root);
+    cimis_out = parse_cimis_json(root);
     if (cimis_out.parse_errors > 0){
         fprintf(stderr, "ERROR: there were %d type errors when parsing the Et0 JSON file.\n", cimis_out.parse_errors);
-        json_decref(root);
         return 1;
     }
+    json_decref(root);
 
     printf("CIMIS Et0 reads %.2f\n", cimis_out.Et0);
     printf("CIMIS precip reads %.2f\n", cimis_out.precip);
 
         
-    // printf("\n\nThe total eto is             %f\n", total_eto);
-    // printf("The total precipitation is   %f (inches of rain)\n\n", total_precipitation);
+    char *irrigation_file = "irrigation_example.json";
+    FILE *open_last_file = fopen(irrigation_file, "r");
 
-    // // read last irrigation file
-    // char *last_file = "last_irrigation.json";
-    // FILE *open_last_file = fopen(last_file, "r");
+    printf("opening JSON irrigation file, irrigation_example.json\n");
+    json_t *root_irr = json_load_file(irrigation_file, 0, &error);
+    if(!root_irr) {
+        printf("Could not open irrigation file %s\n", file_name);
+        fprintf(stderr, "ERROR: on line %d: %s\n", error.line, error.text);
+        return 1;
+    }
 
-    // printf("Opening Last Irrigation JSON file\n");
-    // root_last = json_load_file(last_file, 0, &error_last);
-    // if(!root_last) {
-    //     printf("Could not open file %s\n", last_file);
-    //     fprintf(stderr, "error: on line %d: %s\n", error_last.line, error_last.text);
-    //     return 1;
-    // }
-    // // clean up by closing the file
-    // fclose(open_last_file); 
+    json_t *Data, *get_records;
+    const char *irr_value; // values adding up the total precipitation and ETo over specified range
+
+    // 
+    Data = json_object_get(root_irr, "Data");
+    // Data is an array, but we first get it as an object
+    if (!json_is_array(Data)) {
+        fprintf(stderr, "error: Data is not an array\n");
+        printf("    Data is a(n) %d\n", json_typeof(root_irr));
+        // error_count++;
+    } 
+    
+    // need to iterate through data over all the garden sections
+    long int num_sections = json_array_size(Data);
+    printf("The number of garden sections with separate irrigation systems is: %ld\n", num_sections);
+
+    garden_section section_array[num_sections];
+
+    for (int i = 0; i < num_sections; i++) {
+        get_records = json_array_get(Data, i);
+        if (!json_is_object(get_records)) {
+            printf("error getting the objects within the array\n"); 
+        } 
+
+        section_array[i].name = get_json_string("Name", get_records);
+        // printf("The name of the section is %s\n", section_array[i].name);
+        section_array[i].PF = strtof(get_json_string("PF", get_records), NULL);
+        section_array[i].LA = strtof(get_json_string("LA", get_records), NULL);
+    }
+
+    // clean up by closing the file and json root for irrigation file
+    fclose(open_last_file);
+    json_decref(root_irr);
+
 
     float veggie, backyard, inside, berry, front, grape;
 
@@ -425,7 +472,6 @@ int main(){
         printf("grape remaining water %f (inches of water)\n", grape);
     }
 
-    json_decref(root);
     free(file_name); // deallocate the file_name string
     
     return(0);
