@@ -26,6 +26,7 @@ to compute correct irrigation timing for the various garden locations.
 
 #include <jansson.h>     // json parser for C, see https://jansson.readthedocs.io/en/latest/ for documentation 
 #include <curl/curl.h>   // see for examples https://curl.se/libcurl/c/example.html
+#define _XOPEN_SOURCE    // required for function strptime for <time.h> 
 #include <time.h>
 #include <string.h>
 
@@ -45,9 +46,9 @@ typedef struct cimis_results {
 typedef struct garden_section {
     const char *name;
     float PF;
-    int LA;
-    int days_since;   // number of days since last irrigation 
-    float eff_irr;    // effective irrigation value
+    long int LA;
+    double days_since;   // number of days since last irrigation 
+    float eff_irr;       // effective irrigation value
 } garden_section;
 
 
@@ -249,6 +250,36 @@ const char * get_json_string(char *Val, json_t *json_data){
 
     return json_string_value(getVal);
 }
+
+
+long get_json_long(char *Val, json_t *json_data){
+    json_t *getVal;
+    long value;
+
+    getVal = json_object_get(json_data, Val); // obtain the int val from JSON data
+    value = json_integer_value(getVal);       // convert to an int/long
+    if (value == 0) {
+        printf("Either there return is zero or json is not an int?\n");
+        // printf("    getVal is a(n) %d\n", json_typeof(getVal));
+    }
+
+    return value;
+}
+
+
+double get_json_double(char *Val, json_t *json_data){
+    json_t *getVal;
+    double value;
+
+    getVal = json_object_get(json_data, Val); // obtain the int val from JSON data
+    value = json_real_value(getVal);       // convert to an int/long
+    if (value == 0.) {
+        printf("Either there return is zero or json is not an int\n");
+        // printf("    getVal is a(n) %d\n", json_typeof(getVal));
+    }
+
+    return value;
+}
    
 
 int main(){
@@ -273,31 +304,31 @@ int main(){
     json_t *root_last;
     json_error_t error_last;
 
-    // // provides the current date and time in seconds since the Epoch for the end date provided to CIMIS
-    // time(&date_today);
-    // // subtract the number of days (in seconds) of desired CIMIS data to obtain a start date
-    // date_start = date_today - num_days*(24*60*60);
+    // provides the current date and time in seconds since the Epoch for the end date provided to CIMIS
+    time(&date_today);
+    // subtract the number of days (in seconds) of desired CIMIS data to obtain a start date
+    date_start = date_today - num_days*(24*60*60);
 
-    // // represent the start and end dates in date and time components (local time)
-    // localtime_r(&date_today, &tm_out_today);
-    // localtime_r(&date_start, &tm_out_start);
+    // represent the start and end dates in date and time components (local time)
+    localtime_r(&date_today, &tm_out_today);
+    localtime_r(&date_start, &tm_out_start);
 
-    // // format the strings according to the format specified by CIMIS 
-    // strftime(today_buffer, sizeof(today_buffer), "%Y-%m-%d", &tm_out_today);
-    // strftime(start_buffer, sizeof(start_buffer), "%Y-%m-%d", &tm_out_start);
+    // format the strings according to the format specified by CIMIS 
+    strftime(today_buffer, sizeof(today_buffer), "%Y-%m-%d", &tm_out_today);
+    strftime(start_buffer, sizeof(start_buffer), "%Y-%m-%d", &tm_out_start);
 
-    // // stitch together the file name strings
-    // char *file_name = malloc(strlen("cimis_") + strlen(start_buffer) + strlen("_") + strlen(today_buffer) + strlen(".json") + 1); // +1 for the null-terminator
-    // // make function that has full_url passed as a pointer ref to concatenate the values internally, but can still free the pointer outside of the function
-    // // add checks for errors in malloc here
-    // strcpy(file_name, "cimis_");
-    // strcat(file_name, start_buffer);
-    // strcat(file_name, "_");
-    // strcat(file_name, today_buffer);
-    // strcat(file_name, ".json");
+    // stitch together the file name strings
+    char *file_name = malloc(strlen("cimis_") + strlen(start_buffer) + strlen("_") + strlen(today_buffer) + strlen(".json") + 1); // +1 for the null-terminator
+    // make function that has full_url passed as a pointer ref to concatenate the values internally, but can still free the pointer outside of the function
+    // add checks for errors in malloc here
+    strcpy(file_name, "cimis_");
+    strcat(file_name, start_buffer);
+    strcat(file_name, "_");
+    strcat(file_name, today_buffer);
+    strcat(file_name, ".json");
 
-    char *file_name = "cimis_2023-07-06_2023-07-13.json";   // hard coded for testing, see above code for real file name creation, will cause an invalide free at the end 
-    printf("Testing to see if file %s exists\n", file_name);
+    // char *file_name = "cimis_2023-07-06_2023-07-13.json";   // hard coded for testing, see above code for real file name creation, will cause an invalide free at the end 
+    // printf("Testing to see if file %s exists\n", file_name);
 
     // check if call has already been made for this dataset by checking if a file already exists for it
     FILE *open_file = fopen(file_name, "r");
@@ -396,15 +427,39 @@ int main(){
     garden_section section_array[num_sections];
 
     for (int i = 0; i < num_sections; i++) {
+        long amount_h2o = 0;
+        const char *date_str;
+        struct tm tm_irrigated;
+        time_t t_irr = time(NULL);
+
         get_records = json_array_get(Data, i);
         if (!json_is_object(get_records)) {
-            printf("error getting the objects within the array\n"); 
+            printf("error getting the objects within the array at loop %d\n", i); 
         } 
 
         section_array[i].name = get_json_string("Name", get_records);
         // printf("The name of the section is %s\n", section_array[i].name);
         section_array[i].PF = strtof(get_json_string("PF", get_records), NULL);
-        section_array[i].LA = strtof(get_json_string("LA", get_records), NULL);
+        section_array[i].LA = get_json_long("LA", get_records);
+        // printf("the LA is %ld\n", section_array[i].LA);
+
+        // obtain the date when irrigation happened last and find the difference between it and the current date
+        date_str = get_json_string("Date", get_records);
+        if (strptime(date_str, "%Y-%m-%d", &tm_irrigated) == NULL) {
+            fprintf(stderr, "error: unable to convert string to tm struct\n");
+            return -1;
+        } 
+
+        section_array[i].days_since = difftime(date_today, mktime(&tm_irrigated)) / 86400;  // converts from seconds to days
+        printf("%.f days have passed since last irrigation.\n", section_array[i].days_since);
+
+        if (section_array[i].days_since > 7.) {
+            // don't include irrigation in current calculations
+            section_array[i].days_since = 0.;
+        } else {
+            // obtain the amount of water in gallons from the json file
+            amount_h2o = get_json_long("Gallons", get_records);
+        }
     }
 
     // clean up by closing the file and json root for irrigation file
