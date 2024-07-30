@@ -18,7 +18,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 turn on drip/sprinkler systems based on calculations using
 CIMIS provided ETo and UCANR SLIDE rules (https://ucanr.edu/sites/UrbanHort/Water_Use_of_Turfgrass_and_Landscape_Plant_Materials/SLIDE__Simplified_Irrigation_Demand_Estimation/)
-to compute correct irrigation timing for the various garden locations. 
+to compute correct irrigation timing for the various garden locations, as well as
+the BMP book SCHEDULING: KNOWING WHEN AND HOW MUCH TO IRRIGATE found July 2024 at
+https://bmpbooks.com/media/Irrigation-Management-04-Scheduling-Knowing-When-and-How-Much-to-Irrigate.pdf
 */ 
 
 #include <stdio.h>
@@ -445,13 +447,16 @@ int main(){
 
         // obtain the date when irrigation happened last and find the difference between it and the current date
         date_str = get_json_string("Date", get_records);
-        if (strptime(date_str, "%Y-%m-%d", &tm_irrigated) == NULL) {
+        if (strptime(date_str, "%Y-%m-%d %T", &tm_irrigated) == NULL) {
             fprintf(stderr, "error: unable to convert string to tm struct\n");
             return -1;
         } 
 
+        tm_irrigated.tm_isdst = -1;   // avoid manually determining if DST or not
+        // puts( asctime(&tm_irrigated) );
+
         section_array[i].days_since = difftime(date_today, mktime(&tm_irrigated)) / 86400;  // converts from seconds to days
-        printf("%.f days have passed since last irrigation.\n", section_array[i].days_since);
+        // printf("%.f days have passed since last irrigation.\n", section_array[i].days_since);
 
         if (section_array[i].days_since > 7.) {
             // don't include irrigation in current calculations
