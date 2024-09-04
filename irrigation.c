@@ -303,8 +303,8 @@ int main(){
     json_t *root;
     json_error_t error;
     // Last irrigation JSON file
-    json_t *root_last;
-    json_error_t error_last;
+    json_t *root_irr;
+    json_error_t error_irr;
 
     // provides the current date and time in seconds since the Epoch for the end date provided to CIMIS
     time(&date_today);
@@ -403,10 +403,10 @@ int main(){
     FILE *open_last_file = fopen(irrigation_file, "r");
 
     printf("opening JSON irrigation file, irrigation_example.json\n");
-    json_t *root_irr = json_load_file(irrigation_file, 0, &error);
+    root_irr = json_load_file(irrigation_file, 0, &error_irr);
     if(!root_irr) {
         printf("Could not open irrigation file %s\n", file_name);
-        fprintf(stderr, "ERROR: on line %d: %s\n", error.line, error.text);
+        fprintf(stderr, "ERROR: on line %d: %s\n", error_irr.line, error_irr.text);
         return 1;
     }
 
@@ -422,14 +422,21 @@ int main(){
         // error_count++;
     } 
     
+    // calculate the effective precipitation from CIMIS data
+    float effective_precipitation = cimis_out.precip * 0.5 * 0.623; // in gallons
     // need to iterate through data over all the garden sections
     long int num_sections = json_array_size(Data);
-    printf("The number of garden sections with separate irrigation systems is: %ld\n", num_sections);
+    printf("The number of garden sections with separate irrigation systems is: %ld\n\n", num_sections);
+    printf("---------------------------------------------------------------------\n");
+    printf("   Section    |         Gallons of H2O needed to meet demand\n");
+    printf("---------------------------------------------------------------------\n");
 
     garden_section section_array[num_sections];
 
     for (int i = 0; i < num_sections; i++) {
-        long amount_h2o = 0;
+        long amount_irrigated = 0;
+        float effective_irrigation = 0.;
+        float water_demand = 0.;
         const char *date_str;
         struct tm tm_irrigated;
         time_t t_irr = time(NULL);
@@ -462,77 +469,26 @@ int main(){
             // don't include irrigation in current calculations
             section_array[i].days_since = 0.;
         } else {
-            // obtain the amount of water in gallons from the json file
-            amount_h2o = get_json_long("Gallons", get_records);
+            amount_irrigated = get_json_long("Gallons", get_records);
+            effective_irrigation = (float)amount_irrigated * 0.7; // in gallons, drip irrigation is not 100% effective, but better than flood
+        }
+
+        water_demand = (cimis_out.Et0 * section_array[i].PF * section_array[i].LA * 0.623) - effective_precipitation - effective_irrigation;  // in gallons
+        if (water_demand <= 0.) {
+            // zero or negative water demand mean that there is no need for irrigation 
+            water_demand = 0.;
+        } else {
+            printf("   %s", section_array[i].name);
+            printf("   |                       %.3f   \n", water_demand);
+            printf("---------------------------------------------------------------------\n");
         }
     }
 
     // clean up by closing the file and json root for irrigation file
     fclose(open_last_file);
     json_decref(root_irr);
-
-
-    float veggie, backyard, inside, berry, front, grape;
-
-    float effective_precipitation = cimis_out.precip * 0.5;
-
-
-    // calculations for each garden location:
-    //       Veggie patch:     PF = 1.0, LA = 96 sq. ft
-    veggie = (cimis_out.Et0 * 1.0 * 96.0) - effective_precipitation;
-    if (veggie <= 0.0) { 
-        veggie = 0.0; 
-        printf("veggie should be watered!\n");
-    } else {
-        printf("veggie remaining water %f (inches of water)\n", veggie);
-    }
-
-    //       Backyard:         PF = 0.5, LA = 300? sq. ft
-    backyard = (cimis_out.Et0 * 0.5 * 300.0) - effective_precipitation;
-    if (backyard <= 0.0) { 
-        backyard = 0.0; 
-        printf("backyard should be watered!\n");
-    } else {
-        printf("backyard remaining water %f (inches of water)\n", backyard);
-    }
-
-    //       Inside Side Yard: PF = 0.5?, LA = 64? sq. ft
-    inside = (cimis_out.Et0 * 0.5 * 64.0) - effective_precipitation;
-    if (inside <= 0.0) { 
-        inside = 0.0; 
-        printf("inside should be watered!\n");
-    } else {
-        printf("inside remaining water %f (inches of water)\n", inside);
-    }
-
-    //       Berry Patch:      PF = 0.8?, LA = 64? sq. ft
-    berry = (cimis_out.Et0 * 0.8 * 64.0) - effective_precipitation;
-    if (berry <= 0.0) { 
-        berry = 0.0;
-        printf("berry should be watered!\n");
-    } else {
-        printf("berry remaining water %f (inches of water)\n", berry);
-    }
-
-    //       Native Front:     PF = 0.3?, LA = 32? sq. ft
-    front = (cimis_out.Et0 * 0.3 * 32.0) - effective_precipitation;
-    if (front <= 0.0) { 
-        front = 0.0; 
-        printf("front should be watered!\n");
-    } else {
-        printf("front remaining water %f (inches of water)\n", front);
-    }
-
-    //       Grape:            PF = 0.5?, LA = 8 sq. ft
-    grape = (cimis_out.Et0 * 0.5 * 8.0) - effective_precipitation;
-    if (grape <= 0.0) { 
-        grape = 0.0; 
-        printf("grape should be watered!\n");
-    }  else {
-        printf("grape remaining water %f (inches of water)\n", grape);
-    }
-
-    free(file_name); // deallocate the file_name string
+    // deallocate the CIMIS file_name string
+    free(file_name); 
     
     return(0);
 }

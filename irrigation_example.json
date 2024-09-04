@@ -1,9 +1,9 @@
 {"Data": 
    [
-      {"Name": "Tomato", "PF": "1.0", "LA": "10", "Date": "2024-05-19", "Gallons": "3"},
-      {"Name": "Veggie", "PF": "1.0", "LA": "10", "Date": "2024-04-01", "Gallons": "3"},
-      {"Name": "Artichoke", "PF": "1.0", "LA": "4", "Date": "2024-05-19", "Gallons": "3"},
-      {"Name": "Citrus", "PF": "1.0", "LA": "8", "Date": "2024-05-19", "Gallons": "3"},
-      {"Name": "Grape", "PF": "0.3", "LA": "8", "Date": "2024-05-19", "Gallons": "3"}
+      {"Name": "Tomato", "PF": "1.0", "LA": 10, "Date": "2024-07-09 00:00:00", "Gallons": 3},
+      {"Name": "Veggie", "PF": "1.0", "LA": 10, "Date": "2024-05-09 00:00:00", "Gallons": 3},
+      {"Name": "Artichoke", "PF": "1.0", "LA": 4, "Date": "2024-07-19 00:00:00", "Gallons": 3},
+      {"Name": "Citrus", "PF": "1.0", "LA": 8, "Date": "2024-06-19 00:00:00", "Gallons": 3},
+      {"Name": "Grape", "PF": "0.3", "LA": 8, "Date": "2024-06-19 00:00:00", "Gallons":3}
    ]
 }
