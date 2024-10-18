@@ -9,8 +9,11 @@ Based on calculations using CIMIS provided ETo and UCANR SLIDE rules (https://uc
 To run code, make sure to create an IrrigationConfig.h.in file which declares a CIMIS app-key (APP_KEY) and station number (CIMIS_STATION)
 
 Create a build folder in the irrigation project folder to make it easy to change
-to run on terminal, use:
+WITHIN ./project/build/ run:
   $ cmake --build .
+
+If no cache, rerun 
+  $ cmake .
 
 To get line numbers on valgrind, run code below *before* cmake --build
   $ cmake -DCMAKE_BUILD_TYPE=Debug .
