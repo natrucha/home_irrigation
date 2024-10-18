@@ -261,7 +261,7 @@ long get_json_long(char *Val, json_t *json_data){
     getVal = json_object_get(json_data, Val); // obtain the int val from JSON data
     value = json_integer_value(getVal);       // convert to an int/long
     if (value == 0) {
-        printf("Either there return is zero or json is not an int?\n");
+        printf("Either the return is zero or json is not an int?\n");
         // printf("    getVal is a(n) %d\n", json_typeof(getVal));
     }
 
@@ -276,7 +276,7 @@ double get_json_double(char *Val, json_t *json_data){
     getVal = json_object_get(json_data, Val); // obtain the int val from JSON data
     value = json_real_value(getVal);       // convert to an int/long
     if (value == 0.) {
-        printf("Either there return is zero or json is not an int\n");
+        printf("Either the return is zero or json is not an int\n");
         // printf("    getVal is a(n) %d\n", json_typeof(getVal));
     }
 
@@ -308,8 +308,9 @@ int main(){
 
     // provides the current date and time in seconds since the Epoch for the end date provided to CIMIS
     time(&date_today);
+    date_today = date_today - 86400; // use previous day's data since the current date's data will all be NULL
     // subtract the number of days (in seconds) of desired CIMIS data to obtain a start date
-    date_start = date_today - num_days*(24*60*60);
+    date_start = date_today - num_days*86400;
 
     // represent the start and end dates in date and time components (local time)
     localtime_r(&date_today, &tm_out_today);
@@ -350,7 +351,7 @@ int main(){
         strcat(full_url, "&endDate=");
         strcat(full_url, today_buffer);
 
-        printf("\nGET call to url: %s\n", full_url);
+        // printf("\nGET call to url: \n%s\n", full_url);
 
         // Jansson's function call to request data from url from Jannson's github_commit.c example
         text = request(full_url);
