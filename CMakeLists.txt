@@ -35,6 +35,13 @@ target_link_libraries(Irrigation PUBLIC jansson)
 find_package(CURL REQUIRED)
 target_link_libraries(Irrigation PUBLIC CURL::libcurl) 
 
+# for mosquitto, the MQTT broker, find_library didn't work so had to manually add it
+# did not work when using the snap installation of mosquitto, had to install through apt
+# requires:
+# $ sudo apt install mosquitto mosquitto-clients libmosquitto-dev
+find_library(Mosquitto_libs mosquitto)
+target_link_libraries(Irrigation PUBLIC ${Mosquitto_libs})
+
 # Use target_include_directories to include ${PROJECT_BINARY_DIR}
 target_include_directories(Irrigation PUBLIC 
                             "${PROJECT_BINARY_DIR}"
