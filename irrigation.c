@@ -28,15 +28,22 @@ https://bmpbooks.com/media/Irrigation-Management-04-Scheduling-Knowing-When-and-
 
 #include <jansson.h>     // json parser for C, see https://jansson.readthedocs.io/en/latest/ for documentation 
 #include <curl/curl.h>   // see for examples https://curl.se/libcurl/c/example.html
+#include <mosquitto.h>   // MQTT broker
 #define _XOPEN_SOURCE    // required for function strptime for <time.h> 
 #include <time.h>
 #include <string.h>
+#include <unistd.h>
 
 // Include CMake input file, it's in the build folder so VSCode is freaking out
 #include "IrrigationConfig.h"
 
 
+
 #define BUFFER_SIZE (256 * 1024) /* 256 KB */
+
+const char host_id[24] = MQTT_HOST;
+const char mqtt_ssid[13] = MQTT_SSID_SECRET;
+const char mqtt_password[17] = MQTT_PASSWORD_SECRET;
 
 
 typedef struct cimis_results {
@@ -51,6 +58,8 @@ typedef struct garden_section {
     long int LA;
     double days_since;   // number of days since last irrigation 
     float eff_irr;       // effective irrigation value
+    float water_demand;  // the amount of water that the section will need
+    int relay_num;       // the relay number of that garden section
 } garden_section;
 
 
@@ -437,10 +446,12 @@ int main(){
     for (int i = 0; i < num_sections; i++) {
         long amount_irrigated = 0;
         float effective_irrigation = 0.;
-        float water_demand = 0.;
         const char *date_str;
         struct tm tm_irrigated;
         time_t t_irr = time(NULL);
+
+        section_array[i].water_demand = 0.;
+        section_array[i].relay_num = i+1;       // example only
 
         get_records = json_array_get(Data, i);
         if (!json_is_object(get_records)) {
@@ -474,15 +485,85 @@ int main(){
             effective_irrigation = (float)amount_irrigated * 0.7; // in gallons, drip irrigation is not 100% effective, but better than flood
         }
 
-        water_demand = (cimis_out.Et0 * section_array[i].PF * section_array[i].LA * 0.623) - effective_precipitation - effective_irrigation;  // in gallons
-        if (water_demand <= 0.) {
+        section_array[i].water_demand = (cimis_out.Et0 * section_array[i].PF * section_array[i].LA * 0.623) - effective_precipitation - effective_irrigation;  // in gallons
+        if (section_array[i].water_demand <= 0.) {
             // zero or negative water demand mean that there is no need for irrigation 
-            water_demand = 0.;
+            section_array[i].water_demand = 0.;
         } else {
             printf("   %s", section_array[i].name);
-            printf("   |                       %.3f   \n", water_demand);
+            printf("   |                       %.3f   \n", section_array[i].water_demand);
             printf("---------------------------------------------------------------------\n");
         }
+    }
+
+
+    // setup for MQTT messages to communicate with ESP controlling relay modules
+    struct mosquitto *mosq;     /**< Libmosquito MQTT client instance. */
+
+    int mosq_error = 0;
+
+    //libmosquitto initialization
+    mosquitto_lib_init();
+
+    //Create new libmosquitto client instance
+    mosq = mosquitto_new("irrig_calculator", true, NULL);
+
+    if (!mosq) {
+	    printf("Error: failed to create mosquitto client\n");
+        mosq_error += 1;
+    }
+
+    // connect with a password and user ID
+    if (mosquitto_username_pw_set(mosq, mqtt_ssid, mqtt_password) != MOSQ_ERR_SUCCESS) {
+        printf("Error: failed to connect using the provided user ID and password\n");
+        mosq_error += 1;
+    }
+
+    //Connect to MQTT broker
+    if (mosquitto_connect(mosq, host_id, 1883, 60) != MOSQ_ERR_SUCCESS) {
+	    printf("Error: connecting to MQTT broker failed\n");
+        mosq_error += 1;
+    }
+
+    if (mosq_error > 1) {
+        printf("Error: was unable to connect to MQTT broker, stopping program");
+
+        // clean up by closing the file and json root for irrigation file
+        fclose(open_last_file);
+        json_decref(root_irr);
+        // deallocate the CIMIS file_name string
+        free(file_name); 
+        //Clean up/destroy objects created by libmosquitto
+        mosquitto_destroy(mosq);
+        mosquitto_lib_cleanup();
+        
+        return 0;
+    }
+
+    printf("Now connected to the broker!\n");
+
+	// mosquitto_publish(mosq, NULL, "/back_yard", 7, "2 3000", 0, false);
+
+    for (int i = 0; i < num_sections; i++) {
+        // send messages to ESP to turn on relays for a given amount of time
+        if (section_array[i].water_demand > 0.) {
+            // drip irigation units are gal/hr and we need to send msec to ESP
+            // long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing
+            long irr_timer = (long)(1000 * section_array[i].water_demand); 
+            printf("Section %s will be watered for %lu\n", section_array[i].name, irr_timer);
+            printf("turning ON relay %d\n", section_array[i].relay_num);
+
+            char mssg_out[7];
+            sprintf(mssg_out, "%d %lu", section_array[i].relay_num, irr_timer);
+
+            mosquitto_publish(mosq, NULL, "/back_yard", 7, mssg_out, 0, false);
+
+            int sleep_time = (int)(irr_timer+1000)/1000;
+            printf("computer sleeps for %d seconds\n", sleep_time);
+
+            sleep(sleep_time); // sleep for the expected amount of time the relay is on plus another second (add a return message later that stops sleep)
+        }
+
     }
 
     // clean up by closing the file and json root for irrigation file
@@ -490,6 +571,9 @@ int main(){
     json_decref(root_irr);
     // deallocate the CIMIS file_name string
     free(file_name); 
+    //Clean up/destroy objects created by libmosquitto
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
     
     return(0);
 }
