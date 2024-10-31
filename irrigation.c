@@ -41,9 +41,9 @@ https://bmpbooks.com/media/Irrigation-Management-04-Scheduling-Knowing-When-and-
 
 #define BUFFER_SIZE (256 * 1024) /* 256 KB */
 
-const char host_id[24] = MQTT_HOST;
-const char mqtt_ssid[13] = MQTT_SSID_SECRET;
-const char mqtt_password[17] = MQTT_PASSWORD_SECRET;
+const char host_id[] = MQTT_HOST;
+const char mqtt_ssid[] = MQTT_SSID_SECRET;
+const char mqtt_password[] = MQTT_PASSWORD_SECRET;
 
 
 typedef struct cimis_results {
@@ -447,7 +447,9 @@ int main(){
         long amount_irrigated = 0;
         float effective_irrigation = 0.;
         const char *date_str;
-        struct tm tm_irrigated;
+        char today_irr_buffer[80];
+        struct tm last_tm_irrigated;
+        struct tm new_tm_irrigated;
         time_t t_irr = time(NULL);
 
         section_array[i].water_demand = 0.;
@@ -466,15 +468,15 @@ int main(){
 
         // obtain the date when irrigation happened last and find the difference between it and the current date
         date_str = get_json_string("Date", get_records);
-        if (strptime(date_str, "%Y-%m-%d %T", &tm_irrigated) == NULL) {
+        if (strptime(date_str, "%Y-%m-%d %T", &last_tm_irrigated) == NULL) {
             fprintf(stderr, "error: unable to convert string to tm struct\n");
             return -1;
         } 
 
-        tm_irrigated.tm_isdst = -1;   // avoid manually determining if DST or not
-        // puts( asctime(&tm_irrigated) );
+        last_tm_irrigated.tm_isdst = -1;   // avoid manually determining if DST or not
+        // puts( asctime(&last_tm_irrigated) );
 
-        section_array[i].days_since = difftime(date_today, mktime(&tm_irrigated)) / 86400;  // converts from seconds to days
+        section_array[i].days_since = difftime(date_today, mktime(&last_tm_irrigated)) / 86400;  // converts from seconds to days
         // printf("%.f days have passed since last irrigation.\n", section_array[i].days_since);
 
         if (section_array[i].days_since > 7.) {
@@ -493,9 +495,18 @@ int main(){
             printf("   %s", section_array[i].name);
             printf("   |                       %.3f   \n", section_array[i].water_demand);
             printf("---------------------------------------------------------------------\n");
+
+            // save the new date to "Date" and amount watered to "Gallons" to update the irrigation json later (after confirming that it was watered)
+            strftime(today_irr_buffer, sizeof(today_irr_buffer), "%Y-%m-%d %T", &tm_out_today);
+            // printf("The new date is %s\n", today_irr_buffer);
+            json_object_set(get_records, "Date", json_string(today_irr_buffer));
+
+            // Will round the water demand to get an int for the json file. Not sure I like this, but it's not terrible
+            int demand_ceil = (int)(section_array[i].water_demand); // the number of gallons should remain low and is always positive, so less of an issue to cast
+            // printf("The new value of Gallons is %d\n", demand_ceil);
+            json_object_set(get_records, "Gallons", json_integer(demand_ceil));
         }
     }
-
 
     // setup for MQTT messages to communicate with ESP controlling relay modules
     struct mosquitto *mosq;     /**< Libmosquito MQTT client instance. */
@@ -536,7 +547,7 @@ int main(){
         //Clean up/destroy objects created by libmosquitto
         mosquitto_destroy(mosq);
         mosquitto_lib_cleanup();
-        
+
         return 0;
     }
 
@@ -548,8 +559,8 @@ int main(){
         // send messages to ESP to turn on relays for a given amount of time
         if (section_array[i].water_demand > 0.) {
             // drip irigation units are gal/hr and we need to send msec to ESP
-            // long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing
-            long irr_timer = (long)(1000 * section_array[i].water_demand); 
+            // long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing -> keeps the times shorter
+            long irr_timer = (long)(3600*1000 * section_array[i].water_demand); 
             printf("Section %s will be watered for %lu\n", section_array[i].name, irr_timer);
             printf("turning ON relay %d\n", section_array[i].relay_num);
 
@@ -564,6 +575,11 @@ int main(){
             sleep(sleep_time); // sleep for the expected amount of time the relay is on plus another second (add a return message later that stops sleep)
         }
 
+    }
+
+    // create updated irrigation json file
+    if (json_dump_file(root_irr, "./irrigation_example.json", 0)) {
+        fprintf(stderr, "cannot save json to file\n");
     }
 
     // clean up by closing the file and json root for irrigation file
