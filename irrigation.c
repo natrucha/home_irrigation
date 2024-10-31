@@ -500,13 +500,16 @@ int main(){
             printf("   |                       %.3f   \n", section_array[i].water_demand);
             printf("---------------------------------------------------------------------\n");
 
-            // save the new date to "Date" and amount watered to "Gallons" to update the irrigation json later (after confirming that it was watered)
-            strftime(today_irr_buffer, sizeof(today_irr_buffer), "%Y-%m-%d %T", &tm_out_today);
-            // printf("The new date is %s\n", today_irr_buffer);
-            json_object_set(get_records, "Date", json_string(today_irr_buffer));
+            // setup irrigation json updating only for online relays
+            if (section_array[i].relay_num > 0 && section_array[i].controller_num > 0) {
+                // save the new date to "Date" and amount watered to "Gallons" to update the irrigation json later (after confirming that it was watered)
+                strftime(today_irr_buffer, sizeof(today_irr_buffer), "%Y-%m-%d %T", &tm_out_today);
+                // printf("The new date is %s\n", today_irr_buffer);
+                json_object_set(get_records, "Date", json_string(today_irr_buffer));
 
-            snprintf(demand_ceil, 50, "%f", section_array[i].water_demand); 
-            json_object_set(get_records, "Gallons", json_string(demand_ceil));
+                snprintf(demand_ceil, 50, "%f", section_array[i].water_demand); 
+                json_object_set(get_records, "Gallons", json_string(demand_ceil));
+            }
         }
     }
 
