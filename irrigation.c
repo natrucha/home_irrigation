@@ -59,7 +59,8 @@ typedef struct garden_section {
     double days_since;   // number of days since last irrigation 
     float eff_irr;       // effective irrigation value
     float water_demand;  // the amount of water that the section will need
-    int relay_num;       // the relay number of that garden section
+    long relay_num;      // the relay number of that garden section
+    long controller_num; // the ESP module's number for that section of the garden
 } garden_section;
 
 
@@ -270,7 +271,7 @@ long get_json_long(char *Val, json_t *json_data){
     getVal = json_object_get(json_data, Val); // obtain the int val from JSON data
     value = json_integer_value(getVal);       // convert to an int/long
     if (value == 0) {
-        printf("Either the return is zero or json is not an int?\n");
+        printf("Either the return is zero (offline controllers or relays) or json is not an int?\n");
         // printf("    getVal is a(n) %d\n", json_typeof(getVal));
     }
 
@@ -444,16 +445,14 @@ int main(){
     garden_section section_array[num_sections];
 
     for (int i = 0; i < num_sections; i++) {
-        long amount_irrigated = 0;
+        float amount_irrigated = 0.;
         float effective_irrigation = 0.;
         const char *date_str;
-        char today_irr_buffer[80];
+        char today_irr_buffer[80], demand_ceil[50];
         struct tm last_tm_irrigated;
-        struct tm new_tm_irrigated;
         time_t t_irr = time(NULL);
 
         section_array[i].water_demand = 0.;
-        section_array[i].relay_num = i+1;       // example only
 
         get_records = json_array_get(Data, i);
         if (!json_is_object(get_records)) {
@@ -461,6 +460,9 @@ int main(){
         } 
 
         section_array[i].name = get_json_string("Name", get_records);
+        section_array[i].relay_num = get_json_long("Relay", get_records);
+        section_array[i].controller_num = get_json_long("Controller", get_records);
+
         // printf("The name of the section is %s\n", section_array[i].name);
         section_array[i].PF = strtof(get_json_string("PF", get_records), NULL);
         section_array[i].LA = get_json_long("LA", get_records);
@@ -483,8 +485,10 @@ int main(){
             // don't include irrigation in current calculations
             section_array[i].days_since = 0.;
         } else {
-            amount_irrigated = get_json_long("Gallons", get_records);
-            effective_irrigation = (float)amount_irrigated * 0.7; // in gallons, drip irrigation is not 100% effective, but better than flood
+            // amount_irrigated = get_json_long("Gallons", get_records);
+            amount_irrigated = strtof(get_json_string("Gallons", get_records), NULL);
+            effective_irrigation = amount_irrigated * 0.7; // in gallons, drip irrigation is not 100% effective, but better than flood
+            // effective_irrigation = (float)amount_irrigated * 0.7; // in gallons, drip irrigation is not 100% effective, but better than flood
         }
 
         section_array[i].water_demand = (cimis_out.Et0 * section_array[i].PF * section_array[i].LA * 0.623) - effective_precipitation - effective_irrigation;  // in gallons
@@ -501,10 +505,8 @@ int main(){
             // printf("The new date is %s\n", today_irr_buffer);
             json_object_set(get_records, "Date", json_string(today_irr_buffer));
 
-            // Will round the water demand to get an int for the json file. Not sure I like this, but it's not terrible
-            int demand_ceil = (int)(section_array[i].water_demand); // the number of gallons should remain low and is always positive, so less of an issue to cast
-            // printf("The new value of Gallons is %d\n", demand_ceil);
-            json_object_set(get_records, "Gallons", json_integer(demand_ceil));
+            snprintf(demand_ceil, 50, "%f", section_array[i].water_demand); 
+            json_object_set(get_records, "Gallons", json_string(demand_ceil));
         }
     }
 
@@ -557,19 +559,23 @@ int main(){
 
     for (int i = 0; i < num_sections; i++) {
         // send messages to ESP to turn on relays for a given amount of time
-        if (section_array[i].water_demand > 0.) {
+        if (section_array[i].water_demand > 0. && (section_array[i].relay_num > 0 && section_array[i].controller_num > 0)) { 
+            // make sure there are offline controllers and relays are set at 0 so that those can be ignored until they come online
+
             // drip irigation units are gal/hr and we need to send msec to ESP
-            // long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing -> keeps the times shorter
-            long irr_timer = (long)(3600*1000 * section_array[i].water_demand); 
+            long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing -> keeps the times shorter
+            // long irr_timer = (long)(3600*1000 * section_array[i].water_demand); 
             printf("Section %s will be watered for %lu\n", section_array[i].name, irr_timer);
-            printf("turning ON relay %d\n", section_array[i].relay_num);
+            printf("turning ON relay %lu\n", section_array[i].relay_num);
 
             char mssg_out[7];
-            sprintf(mssg_out, "%d %lu", section_array[i].relay_num, irr_timer);
+            sprintf(mssg_out, "%lu %lu", section_array[i].relay_num, irr_timer);
 
-            mosquitto_publish(mosq, NULL, "/back_yard", 7, mssg_out, 0, false);
+            if (section_array[i].controller_num == 1) {
+                mosquitto_publish(mosq, NULL, "/back_yard", 7, mssg_out, 0, false);                
+            } // add more topics as the ESPs come online
 
-            int sleep_time = (int)(irr_timer+1000)/1000;
+            int sleep_time = (int)(irr_timer)/1000 + 2; // add two seconds so that the relays never turn on at the same time (pressure problems if using the same source of water)
             printf("computer sleeps for %d seconds\n", sleep_time);
 
             sleep(sleep_time); // sleep for the expected amount of time the relay is on plus another second (add a return message later that stops sleep)
