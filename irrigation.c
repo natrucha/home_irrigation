@@ -37,14 +37,14 @@ https://bmpbooks.com/media/Irrigation-Management-04-Scheduling-Knowing-When-and-
 // Include CMake input file, it's in the build folder so VSCode is freaking out
 #include "IrrigationConfig.h"
 
-
-
 #define BUFFER_SIZE (256 * 1024) /* 256 KB */
 
 const char host_id[] = MQTT_HOST;
 const char mqtt_ssid[] = MQTT_SSID_SECRET;
 const char mqtt_password[] = MQTT_PASSWORD_SECRET;
 
+int curr_relay_done = 0;
+int curr_contrlr_done = 0;
 
 typedef struct cimis_results {
     float Et0;
@@ -292,7 +292,18 @@ double get_json_double(char *Val, json_t *json_data){
 
     return value;
 }
-   
+
+
+void on_message(struct mosquitto *mosq, void *obj, const struct mosquitto_message *msg) {
+
+    char * curr_payload = (char *) msg->payload;
+
+    curr_contrlr_done = atoi(curr_payload);
+    curr_relay_done = atoi(curr_payload+1);
+
+	printf("New message with topic %s: %s\n", msg->topic, (char *) msg->payload);
+}
+
 
 int main(){
     char *cimis_station = CIMIS_STATION;
@@ -523,6 +534,7 @@ int main(){
 
     //Create new libmosquitto client instance
     mosq = mosquitto_new("irrig_calculator", true, NULL);
+    mosquitto_message_callback_set(mosq, on_message);
 
     if (!mosq) {
 	    printf("Error: failed to create mosquitto client\n");
@@ -553,12 +565,15 @@ int main(){
         mosquitto_destroy(mosq);
         mosquitto_lib_cleanup();
 
-        return 0;
+        return -1;
     }
 
-    printf("Now connected to the broker!\n");
+    // subscribe to the ESP's callback
+    mosquitto_subscribe(mosq, NULL, "/relay_done", 0);
 
-	// mosquitto_publish(mosq, NULL, "/back_yard", 7, "2 3000", 0, false);
+    printf("Now connected to the broker!\n");
+    // Call to start a new thread to process network traffic
+    mosquitto_loop_start(mosq);
 
     for (int i = 0; i < num_sections; i++) {
         // send messages to ESP to turn on relays for a given amount of time
@@ -578,13 +593,20 @@ int main(){
                 mosquitto_publish(mosq, NULL, "/back_yard", 7, mssg_out, 0, false);                
             } // add more topics as the ESPs come online
 
-            int sleep_time = (int)(irr_timer)/1000 + 2; // add two seconds so that the relays never turn on at the same time (pressure problems if using the same source of water)
+            int sleep_time = (int)(irr_timer)/1000 + 1; // add two seconds so that the relays never turn on at the same time (pressure problems if using the same source of water)
             printf("computer sleeps for %d seconds\n", sleep_time);
 
-            sleep(sleep_time); // sleep for the expected amount of time the relay is on plus another second (add a return message later that stops sleep)
+            sleep(sleep_time); // sleep for the expected amount of time the relay is on plus another second (add a return message later that stops sleep?)
+
+            // check to see if there was a return message from the correct controller and relay
+            if (curr_contrlr_done == section_array[i].controller_num && curr_relay_done == section_array[i].relay_num) {
+                printf("Garden section successfully watered!\n\n");
+            }
         }
 
     }
+
+    mosquitto_loop_stop(mosq, true);
 
     // create updated irrigation json file
     if (json_dump_file(root_irr, "./irrigation_example.json", 0)) {
@@ -597,6 +619,7 @@ int main(){
     // deallocate the CIMIS file_name string
     free(file_name); 
     //Clean up/destroy objects created by libmosquitto
+    mosquitto_disconnect(mosq);
     mosquitto_destroy(mosq);
     mosquitto_lib_cleanup();
     
