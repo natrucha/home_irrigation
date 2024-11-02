@@ -30,18 +30,15 @@ to compute correct irrigation timing for the various garden locations.
 // Wifi information header  
 #include "IrrigationConfig.h" 
 
-// WiFi parameters to connect to home router, cannot connect to 5 GHz
-// const char* ssid = WIFI_SSID_SECRET;
-// const char* password = WIFI_PASSWORD_SECRET;
-
 const char ssid[] = WIFI_SSID_SECRET;
 const char password[] = WIFI_PASSWORD_SECRET;
 
-const char client_id[] = "esp_node";
+const char client_id[] = "esp1_node";
 const char host_id[] = MQTT_HOST;
 const char mqtt_ssid[] = MQTT_SSID_SECRET;
 const char mqtt_password[] = MQTT_PASSWORD_SECRET;
 
+String controller_num = String("1 ");   // ESP number for this garden section (0 == offline), add space to make processing easier
 
 WiFiClient net;
 MQTTClient client;
@@ -52,7 +49,7 @@ bool newTimerState = false;     // flag to determine when newTimer should be hee
 unsigned long relayOnTimer = 0; // in msec, the amount of time the relay should stay ON to water the plants
 
 uint8_t relay_state4 = 0x0; 
-uint8_t relay_state2 = 0x0; 
+uint8_t relay_state2 =  0x0; 
 uint8_t relay_state3 = 0x0; 
 
 void connect() {
@@ -83,16 +80,16 @@ void messageReceived(String &topic, String &payload) {
   String time_string = payload.substring(2);
   
   switch (relay_string.toInt())
-  // change global variable that leads to irrigation for the given garden sector
+  // change global variable that leads to irrigation for the given garden sector, only three relays are in use
   {
-    case 1:
-        relay_state4 = 0x1;
-        break;
     case 2:
         relay_state2 = 0x1;
         break;
     case 3:
         relay_state3 = 0x1;
+        break;
+    case 4:
+        relay_state4 = 0x1;
         break;
   }
 
@@ -119,22 +116,23 @@ const int R8_GPIO = 2;  // D4
 void setup() {
     // Serial.begin(115200);
 
-    // gpio_output_set();
+    // ESP8266_REG(310) = (1 << 2); // this is the PIN_DIR_OUTPUT register (sets a pin to be an output if the gpio's bit is high) -> GPES in core_esp8266_wiring_digital.cpp
+    // gpio_output_set((bit_value)<<gpio_no, ((~(bit_value))&0x01)<<gpio_no, 1<<gpio_no, 0)
 
     pinMode(R2_GPIO, OUTPUT); 
-    digitalWrite(R2_GPIO, LOW); 
+    digitalWrite(R2_GPIO, 0x0); 
     pinMode(R3_GPIO, OUTPUT); 
-    digitalWrite(R3_GPIO, LOW); 
+    digitalWrite(R3_GPIO, 0x0); 
     pinMode(R4_GPIO, OUTPUT); 
-    digitalWrite(R4_GPIO, LOW); 
+    digitalWrite(R4_GPIO, 0x0); 
 
     // turn relays 6-8 off, otherwise on by default
     pinMode(R6_GPIO, OUTPUT); 
-    digitalWrite(R6_GPIO, LOW);
+    digitalWrite(R6_GPIO, 0x0);
     pinMode(R7_GPIO, OUTPUT); 
-    digitalWrite(R7_GPIO, LOW);
+    digitalWrite(R7_GPIO, 0x0);
     pinMode(R8_GPIO, OUTPUT); 
-    digitalWrite(R8_GPIO, LOW);
+    digitalWrite(R8_GPIO, 0x0);
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
@@ -156,7 +154,7 @@ void loop() {
     }
 
     
-    if ((relay_state4 || relay_state2 || relay_state3) && !newTimerState) {
+    if ((relay_state2 || relay_state3 || relay_state4) && !newTimerState) {
         // if any of the relay states is on, start a timer to turn them off in ~1 second
         newTimer = millis();
         newTimerState = true;
@@ -165,19 +163,20 @@ void loop() {
     // turn off any relays and reset timers
     if ((millis() - newTimer > relayOnTimer) && newTimerState) {
         int relayOn = relay_state4*4 + relay_state3*3 + relay_state2*2;  // possible bc only one relay should ever be on at any one time
-        client.publish("/relay_done", String(relayOn));
+        
+        client.publish("/relay_done", String(controller_num + relayOn));
         // Serial.printf("The outgoing message will say that relay %d was on\n", relayOn);
 
-        relay_state4 = 0x0;
         relay_state2 = 0x0;
         relay_state3 = 0x0;
+        relay_state4 = 0x0;
         newTimerState = false;
         relayOnTimer = 0;
     }
 
-    digitalWrite(R4_GPIO, relay_state4);
     digitalWrite(R2_GPIO, relay_state2);
     digitalWrite(R3_GPIO, relay_state3); 
+    digitalWrite(R4_GPIO, relay_state4);
     
 
     // test by publishing a message roughly every 10 second.
