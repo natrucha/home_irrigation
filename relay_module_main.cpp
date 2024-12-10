@@ -48,9 +48,10 @@ unsigned long newTimer = 0;     // in msec, the amount of time that has passed s
 bool newTimerState = false;     // flag to determine when newTimer should be heeded
 unsigned long relayOnTimer = 0; // in msec, the amount of time the relay should stay ON to water the plants
 
-uint8_t relay_state4 = 0x0; 
-uint8_t relay_state2 =  0x0; 
+uint8_t relay_state2 = 0x0; 
 uint8_t relay_state3 = 0x0; 
+uint8_t relay_state4 = 0x0;
+uint8_t relay_state8 = 0x0;  // extra pin if needed
 
 void connect() {
 //   Serial.print("checking wifi...");
@@ -91,10 +92,13 @@ void messageReceived(String &topic, String &payload) {
     case 4:
         relay_state4 = 0x1;
         break;
+    case 8:
+        relay_state8 = 0x1;
+        break;
   }
 
   relayOnTimer = (unsigned long)time_string.toInt();
-//   Serial.printf("Relay will be on for %lu (in msec)\n", relayOnTimer);
+  // Serial.printf("Relay will be on for %lu (in msec)\n", relayOnTimer);
  
   // Note: Do not use the client in the callback to publish, subscribe or
   // unsubscribe as it may cause deadlocks when other things arrive while
@@ -103,20 +107,21 @@ void messageReceived(String &topic, String &payload) {
 }
 
 
-
+// see https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
 // const int R1_GPIO = 15; // D8, pulled to ground and SPI (only ok as output pin)
-const int R2_GPIO = 13; // D7
-const int R3_GPIO = 12; // D6
-const int R4_GPIO = 14; // D5
-// const int R5_GPIO = 16; // D0
-const int R6_GPIO = 3;  // RX
-const int R7_GPIO = 0;  // D3
-const int R8_GPIO = 2;  // D4
+const int R2_GPIO = 13; // D7, MOSI
+const int R3_GPIO = 12; // D6, MISO
+const int R4_GPIO = 14; // D5, SCK
+// const int R5_GPIO = 16; // D0, WAKE
+const int R6_GPIO = 3;  // RX, don't use this as output especially if UART in is desirable
+const int R7_GPIO = 0;  // D3, FLASH, pulled to ground
+// using D4 pulled to low, means that the LED will always be on
+const int R8_GPIO = 2;  // D4, LED, pulled to ground, HIGH at boot
 
 void setup() {
     // Serial.begin(115200);
 
-    // ESP8266_REG(310) = (1 << 2); // this is the PIN_DIR_OUTPUT register (sets a pin to be an output if the gpio's bit is high) -> GPES in core_esp8266_wiring_digital.cpp
+    // ESP8266_REG(310) = (1 << 2); //   this is the PIN_DIR_OUTPUT register (sets a pin to be an output if the gpio's bit is high) -> GPES in core_esp8266_wiring_digital.cpp
     // gpio_output_set((bit_value)<<gpio_no, ((~(bit_value))&0x01)<<gpio_no, 1<<gpio_no, 0)
 
     pinMode(R2_GPIO, OUTPUT); 
@@ -125,14 +130,15 @@ void setup() {
     digitalWrite(R3_GPIO, 0x0); 
     pinMode(R4_GPIO, OUTPUT); 
     digitalWrite(R4_GPIO, 0x0); 
+    pinMode(R8_GPIO, OUTPUT); 
+    digitalWrite(R8_GPIO, 0x0); 
 
-    // turn relays 6-8 off, otherwise on by default
+    // turn relays 6-7 off, otherwise on by default
     pinMode(R6_GPIO, OUTPUT); 
     digitalWrite(R6_GPIO, 0x0);
     pinMode(R7_GPIO, OUTPUT); 
     digitalWrite(R7_GPIO, 0x0);
-    pinMode(R8_GPIO, OUTPUT); 
-    digitalWrite(R8_GPIO, 0x0);
+    
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
@@ -154,7 +160,7 @@ void loop() {
     }
 
     
-    if ((relay_state2 || relay_state3 || relay_state4) && !newTimerState) {
+    if ((relay_state2 || relay_state3 || relay_state4 || relay_state8) && !newTimerState) {
         // if any of the relay states is on, start a timer to turn them off in ~1 second
         newTimer = millis();
         newTimerState = true;
@@ -162,7 +168,7 @@ void loop() {
 
     // turn off any relays and reset timers
     if ((millis() - newTimer > relayOnTimer) && newTimerState) {
-        int relayOn = relay_state4*4 + relay_state3*3 + relay_state2*2;  // possible bc only one relay should ever be on at any one time
+        int relayOn = relay_state8*8 + relay_state4*4 + relay_state3*3 + relay_state2*2;  // possible bc only one relay should ever be on at any one time
         
         client.publish("/relay_done", String(controller_num + relayOn));
         // Serial.printf("The outgoing message will say that relay %d was on\n", relayOn);
@@ -170,6 +176,7 @@ void loop() {
         relay_state2 = 0x0;
         relay_state3 = 0x0;
         relay_state4 = 0x0;
+        relay_state8 = 0x0;
         newTimerState = false;
         relayOnTimer = 0;
     }
@@ -177,6 +184,7 @@ void loop() {
     digitalWrite(R2_GPIO, relay_state2);
     digitalWrite(R3_GPIO, relay_state3); 
     digitalWrite(R4_GPIO, relay_state4);
+    digitalWrite(R8_GPIO, relay_state8);
     
 
     // test by publishing a message roughly every 10 second.
