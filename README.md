@@ -20,3 +20,19 @@ To get line numbers on valgrind, run code below *before* cmake --build
 
 Use Valgrind to check for seg faults or memory leaks 
   $ valgrind --leak-check=full --tool=memcheck --track-origins=yes --num-callers=16 --leak-resolution=high ./Irrigation 
+
+
+## Using Mosquitto for MQTT
+Starting the process with a non-default config file with -d to run in the background, -c for config file: 
+  $ mosquitto -d -c /etc/mosquitto/mosquitto.conf 
+
+Publish a message from server:
+  $ mosquitto_pub -h host_name -t /topic_name -m "message" -u pwd_user_name -P pwd
+
+  Notes: if the username has spaces, can use '/' after each word as in other linux commands, e.g. user/ name/ words, or put the words within '', e.g. 'user name words'
+
+Topic name will determine which relay module will turn on and is named after the section being watered
+  e.g. /back_yard
+
+Message sent to turn on relay R for TIME milliseconds would be written as: 
+  "R TIME", e.g. "3 4000"
