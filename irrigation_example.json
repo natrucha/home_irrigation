@@ -1,9 +1,9 @@
 {"Data": 
    [
-      {"Name": "Tomato", "PF": "1.0", "LA": 10, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "Controller": 1, "Relay": 0},
-      {"Name": "Veggie", "PF": "1.0", "LA": 10, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "Controller": 1, "Relay": 2},
-      {"Name": "Artichoke", "PF": "1.0", "LA": 4, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "Controller": 1, "Relay": 3},
-      {"Name": "Citrus", "PF": "1.0", "LA": 8, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "Controller": 1, "Relay": 4},
-      {"Name": "Grape", "PF": "0.3", "LA": 8, "Date": "2024-10-28 00:00:00", "Gallons":"3.0", "Controller": 1, "Relay": 0}
+      {"Name": "Tomato", "PF": "1.0", "LA": 10, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "numEmitters": 5, "Controller": 1, "Relay": 0},
+      {"Name": "Veggie", "PF": "1.0", "LA": 10, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "numEmitters": 5, "Controller": 1, "Relay": 2},
+      {"Name": "Artichoke", "PF": "1.0", "LA": 4, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "numEmitters": 5, "Controller": 1, "Relay": 3},
+      {"Name": "Citrus", "PF": "1.0", "LA": 8, "Date": "2024-10-28 00:00:00", "Gallons": "3.0", "numEmitters": 5, "Controller": 1, "Relay": 4},
+      {"Name": "Grape", "PF": "0.3", "LA": 8, "Date": "2024-10-28 00:00:00", "Gallons":"3.0", "numEmitters": 5, "Controller": 1, "Relay": 0}
    ]
 }

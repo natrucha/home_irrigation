@@ -54,11 +54,12 @@ typedef struct cimis_results {
 
 typedef struct garden_section {
     const char *name;
-    float PF;
-    long int LA;
+    float PF;            // combined water demand determined by the types of plants being watered
+    long int LA;         // in ft^2, the area the garden section takes up
     double days_since;   // number of days since last irrigation 
     float eff_irr;       // effective irrigation value
     float water_demand;  // the amount of water that the section will need
+    long num_emitter;    // the number of drip emitters in the garden section
     long relay_num;      // the relay number of that garden section
     long controller_num; // the ESP module's number for that section of the garden
 } garden_section;
@@ -75,7 +76,7 @@ static size_t write_response(void *ptr, size_t size, size_t nmemb, void *stream)
     struct write_result *result = (struct write_result *)stream;
 
     if (result->pos + size * nmemb >= BUFFER_SIZE - 1) {
-        fprintf(stderr, "error: too small buffer\n");
+        fprintf(stderr, "error: buffer too small\n");
         return 0;
     }
 
@@ -390,7 +391,7 @@ int main(){
 
         // dump json into a file
         json_dump_file(root, file_name, 0);
-        printf("JSON being saved to file: %s\n", file_name);
+        printf("\nJSON being saved to file: %s\n", file_name);
 
         free(full_url); // deallocate the file_name string
         printf("CIMIS data obtained and cached\n");
@@ -421,10 +422,10 @@ int main(){
     printf("CIMIS precip reads %.2f\n", cimis_out.precip);
 
         
-    char *irrigation_file = "irrigation_example.json";
+    char *irrigation_file = "irrigation_log.json";
     FILE *open_last_file = fopen(irrigation_file, "r");
 
-    printf("opening JSON irrigation file, irrigation_example.json\n");
+    printf("opening JSON irrigation file, irrigation_log.json\n");
     root_irr = json_load_file(irrigation_file, 0, &error_irr);
     if(!root_irr) {
         printf("Could not open irrigation file %s\n", file_name);
@@ -471,6 +472,7 @@ int main(){
         } 
 
         section_array[i].name = get_json_string("Name", get_records);
+        section_array[i].num_emitter = get_json_long("numEmitters", get_records);
         section_array[i].relay_num = get_json_long("Relay", get_records);
         section_array[i].controller_num = get_json_long("Controller", get_records);
 
@@ -571,7 +573,7 @@ int main(){
     // subscribe to the ESP's callback
     mosquitto_subscribe(mosq, NULL, "/relay_done", 0);
 
-    printf("Now connected to the broker!\n");
+    printf("\nNow connected to the broker!\n");
     // Call to start a new thread to process network traffic
     mosquitto_loop_start(mosq);
 
@@ -581,9 +583,9 @@ int main(){
             // make sure there are offline controllers and relays are set at 0 so that those can be ignored until they come online
 
             // drip irigation units are gal/hr and we need to send msec to ESP
-            long irr_timer = (long)(1000 * section_array[i].water_demand); // assumes drip is set to 1 gal/sec for testing -> keeps the times shorter
-            // long irr_timer = (long)(3600*1000 * section_array[i].water_demand); 
-            printf("Section %s will be watered for %lu\n", section_array[i].name, irr_timer);
+            // long irr_timer = (long)(1000 * section_array[i].water_demand / (section_array[i].num_emitter * 0.7)); // assumes drip is set to 1 gal/sec for testing -> keeps the times shorter
+            long irr_timer = (long)(3600*1000 * section_array[i].water_demand / (section_array[i].num_emitter * 0.7));  // in msec
+            printf("Section %s will be watered for %lu msec\n", section_array[i].name, irr_timer);
             printf("turning ON relay %lu\n", section_array[i].relay_num);
 
             char mssg_out[7];
@@ -609,7 +611,7 @@ int main(){
     mosquitto_loop_stop(mosq, true);
 
     // create updated irrigation json file
-    if (json_dump_file(root_irr, "./irrigation_example.json", 0)) {
+    if (json_dump_file(root_irr, "./irrigation_log.json", 0)) {
         fprintf(stderr, "cannot save json to file\n");
     }
 
